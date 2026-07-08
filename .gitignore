@@ -1,0 +1,24 @@
+﻿# Environment variables — NEVER commit real credentials
+.env
+
+# Gradle build outputs and caches
+.gradle/
+build/
+
+# IntelliJ IDEA project files
+.idea/
+*.iml
+out/
+
+# VS Code
+.vscode/
+
+# Kotlin compilation artifacts
+.kotlin/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
