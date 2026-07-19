@@ -25,7 +25,7 @@ data class OptimizedStop(
 )
 
 interface RouteOptimizer {
-    fun optimize(
+    suspend fun optimize(
         vehicleLat: Double,
         vehicleLng: Double,
         stops: List<StopCandidate>

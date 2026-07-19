@@ -13,13 +13,20 @@ import kotlin.math.sqrt
  *
  * Swap this for a VRPTW-based implementation later by writing a class that
  * implements RouteOptimizer and changing the constructor wiring in
- * Application.kt — RoutingService and everything calling it stays untouched.
+ * Routing.kt — RoutingService and everything calling it stays untouched.
+ *
+ * Ordering ("which stop is nearest") is decided using local haversine math,
+ * never a network call — that stays true regardless of which [EtaEstimator] is
+ * injected. Only once a stop is actually chosen does this class ask the
+ * estimator for the real travel time to it. That means exactly one ETA
+ * lookup per stop in the final route, not one per candidate comparison during
+ * the greedy search — the difference between N calls and roughly N² calls.
  */
 class GreedyNearestNeighbourOptimizer(
-    private val averageSpeedKmh: Double = 25.0 // typical urban traffic speed for ETA estimate
+    private val etaEstimator: EtaEstimator = HaversineEtaEstimator()
 ) : RouteOptimizer {
 
-    override fun optimize(
+    override suspend fun optimize(
         vehicleLat: Double,
         vehicleLng: Double,
         stops: List<StopCandidate>
@@ -34,8 +41,7 @@ class GreedyNearestNeighbourOptimizer(
         var sequenceOrder = 1
         while (remaining.isNotEmpty()) {
             val nearest = remaining.minByOrNull { haversineMeters(currentLat, currentLng, it.lat, it.lng) }!!
-            val distanceMeters = haversineMeters(currentLat, currentLng, nearest.lat, nearest.lng)
-            cumulativeMinutes += estimateMinutes(distanceMeters)
+            cumulativeMinutes += etaEstimator.estimateMinutes(currentLat, currentLng, nearest.lat, nearest.lng)
 
             ordered.add(
                 OptimizedStop(
@@ -55,19 +61,20 @@ class GreedyNearestNeighbourOptimizer(
         return ordered
     }
 
-    private fun estimateMinutes(distanceMeters: Double): Int {
-        val hours = (distanceMeters / 1000.0) / averageSpeedKmh
-        return (hours * 60).toInt().coerceAtLeast(1)
-    }
-
-    /** Straight-line distance in meters between two lat/lng points. */
+    /**
+     * Straight-line distance in meters between two lat/lng points — used only to
+     * pick the greedy nearest candidate at each step, never to compute the ETA
+     * shown to users (that's [etaEstimator]'s job now). Kept local and
+     * dependency-free so ordering decisions never require a network call, even
+     * when the injected estimator does.
+     */
     private fun haversineMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val earthRadiusMeters = 6_371_000.0
         val dLat = Math.toRadians(lat2 - lat1)
         val dLng = Math.toRadians(lng2 - lng1)
         val a = sin(dLat / 2).let { it * it } +
-            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-            sin(dLng / 2).let { it * it }
+                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+                sin(dLng / 2).let { it * it }
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         return earthRadiusMeters * c
     }

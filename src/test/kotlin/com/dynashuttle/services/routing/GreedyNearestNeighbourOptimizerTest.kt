@@ -1,5 +1,6 @@
 package com.dynashuttle.services.routing
 
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -11,13 +12,20 @@ import kotlin.test.assertTrue
  *
  * Coordinates used throughout are loosely centered on Bangalore (~12.97 N, 77.59 E)
  * just to keep numbers readable; the actual city doesn't matter to the haversine math.
+ *
+ * optimize() is now a suspend function (see RouteOptimizer/EtaEstimator — ordering
+ * stays synchronous/local, but the interface had to become suspend so a real
+ * implementation can call an external ETA provider). Every test body below is
+ * wrapped in runBlocking { } for that reason. The optimizer here still uses the
+ * default HaversineEtaEstimator, so every expected number in this file is
+ * identical to before this split — only the call syntax changed, not the math.
  */
 class GreedyNearestNeighbourOptimizerTest {
 
     private val optimizer = GreedyNearestNeighbourOptimizer()
 
     @Test
-    fun `visits stops in nearest-first order`() {
+    fun `visits stops in nearest-first order`() = runBlocking {
         val vehicleLat = 12.9000
         val vehicleLng = 77.5000
 
@@ -44,7 +52,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `visits the nearest stop first regardless of input order`() {
+    fun `visits the nearest stop first regardless of input order`() = runBlocking {
         val vehicleLat = 12.9716
         val vehicleLng = 77.5946
 
@@ -60,7 +68,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `etaMinutes is strictly non-decreasing`() {
+    fun `etaMinutes is strictly non-decreasing`() = runBlocking {
         val vehicleLat = 12.9000
         val vehicleLng = 77.5000
 
@@ -81,7 +89,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `eta is monotonically non-decreasing along the route`() {
+    fun `eta is monotonically non-decreasing along the route`() = runBlocking {
         val vehicleLat = 12.9716
         val vehicleLng = 77.5946
 
@@ -101,7 +109,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `single stop returns list of size 1 with sequenceOrder 1`() {
+    fun `single stop returns list of size 1 with sequenceOrder 1`() = runBlocking {
         val vehicleLat = 12.9000
         val vehicleLng = 77.5000
         val stops = listOf(StopCandidate("req-1", 12.9010, 77.5010))
@@ -114,13 +122,13 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `returns empty list when there are no stops`() {
+    fun `returns empty list when there are no stops`() = runBlocking {
         val result = optimizer.optimize(vehicleLat = 12.9716, vehicleLng = 77.5946, stops = emptyList())
         assertEquals(emptyList(), result)
     }
 
     @Test
-    fun `zero distance stops resolve to sensible order and respect floor ETA`() {
+    fun `zero distance stops resolve to sensible order and respect floor ETA`() = runBlocking {
         val vehicleLat = 12.9000
         val vehicleLng = 77.5000
 
@@ -142,12 +150,12 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `slower average speed produces a longer ETA for the same distance`() {
+    fun `slower average speed produces a longer ETA for the same distance`() = runBlocking {
         // Due north of the vehicle, roughly 11.1 km away (0.1 degree of latitude).
         val stop = StopCandidate("r1", 13.0716, 77.5946)
 
-        val fastOptimizer = GreedyNearestNeighbourOptimizer(averageSpeedKmh = 50.0)
-        val slowOptimizer = GreedyNearestNeighbourOptimizer(averageSpeedKmh = 10.0)
+        val fastOptimizer = GreedyNearestNeighbourOptimizer(etaEstimator = HaversineEtaEstimator(averageSpeedKmh = 50.0))
+        val slowOptimizer = GreedyNearestNeighbourOptimizer(etaEstimator = HaversineEtaEstimator(averageSpeedKmh = 10.0))
 
         val fastEta = fastOptimizer.optimize(12.9716, 77.5946, listOf(stop)).first().etaMinutes
         val slowEta = slowOptimizer.optimize(12.9716, 77.5946, listOf(stop)).first().etaMinutes
@@ -156,7 +164,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `does not mutate the caller's input stops list`() {
+    fun `does not mutate the caller's input stops list`() = runBlocking {
         val stops = mutableListOf(
             StopCandidate("a", 12.9800, 77.6050),
             StopCandidate("b", 12.9900, 77.6150)
@@ -169,7 +177,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `real world Bangalore coordinates sanity check`() {
+    fun `real world Bangalore coordinates sanity check`() = runBlocking {
         // Whitefield coordinates
         val vehicleLat = 12.9600
         val vehicleLng = 77.7400
@@ -187,7 +195,7 @@ class GreedyNearestNeighbourOptimizerTest {
     }
 
     @Test
-    fun `sequence numbers are assigned in visiting order starting at 1`() {
+    fun `sequence numbers are assigned in visiting order starting at 1`() = runBlocking {
         val stops = listOf(
             StopCandidate("a", 12.9800, 77.6050),
             StopCandidate("b", 12.9900, 77.6150),

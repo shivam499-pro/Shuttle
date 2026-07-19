@@ -37,6 +37,10 @@ dependencies {
     // WebSockets — real-time GPS broadcast
     implementation("io.ktor:ktor-server-websockets-jvm:$ktorVersion")
 
+    // HTTP client — outbound calls to third-party routing APIs (TomTom, see EtaEstimator)
+    implementation("io.ktor:ktor-client-core:$ktorVersion")
+    implementation("io.ktor:ktor-client-cio:$ktorVersion")
+
     // Request validation, CORS, status pages (error handling)
     implementation("io.ktor:ktor-server-cors-jvm:$ktorVersion")
     implementation("io.ktor:ktor-server-status-pages-jvm:$ktorVersion")
@@ -62,4 +66,3 @@ dependencies {
     // Password Hashing
     implementation("at.favre.lib:bcrypt:0.10.2")
 }
-
