@@ -1,5 +1,6 @@
 package com.dynashuttle.repositories
 
+import com.dynashuttle.models.Employees
 import com.dynashuttle.models.RideRequestDto
 import com.dynashuttle.models.RideRequests
 import org.jetbrains.exposed.sql.and
@@ -59,5 +60,22 @@ class PostgresRideRequestRepository : RideRequestRepository {
                 if (tripId != null) it[RideRequests.tripId] = UUID.fromString(tripId)
             }
         }
+    }
+
+    override fun findActiveByTripId(tripId: String): List<ActiveTripStop> = transaction {
+        (RideRequests innerJoin Employees)
+            .selectAll()
+            .where {
+                (RideRequests.tripId eq UUID.fromString(tripId)) and
+                        (RideRequests.status eq "MATCHED")
+            }
+            .map {
+                ActiveTripStop(
+                    rideRequestId = it[RideRequests.id].toString(),
+                    employeeName = it[Employees.name],
+                    pickupLat = it[RideRequests.pickupLat],
+                    pickupLng = it[RideRequests.pickupLng]
+                )
+            }
     }
 }

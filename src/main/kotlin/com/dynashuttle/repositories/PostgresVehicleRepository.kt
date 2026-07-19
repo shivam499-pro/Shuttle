@@ -118,4 +118,24 @@ class PostgresVehicleRepository : VehicleRepository {
             .map { it[Trips.vehicleId].toString() }
             .singleOrNull()
     }
+
+    /**
+     * Joins Trips -> Vehicles to get the assigned vehicle's latest reported position.
+     * Returns null only when [tripId] doesn't exist at all; a trip whose vehicle hasn't
+     * reported GPS yet still returns a [VehicleLocation] with null lat/lng (see KDoc on
+     * the interface for why that distinction matters to callers).
+     */
+    override fun findVehicleLocationByTripId(tripId: String): VehicleLocation? = transaction {
+        (Trips innerJoin Vehicles)
+            .selectAll()
+            .where { Trips.id eq UUID.fromString(tripId) }
+            .map {
+                VehicleLocation(
+                    vehicleId = it[Vehicles.id].toString(),
+                    lat = it[Vehicles.lastKnownLat],
+                    lng = it[Vehicles.lastKnownLng]
+                )
+            }
+            .singleOrNull()
+    }
 }

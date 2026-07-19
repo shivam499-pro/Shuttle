@@ -1,13 +1,16 @@
 package com.dynashuttle.services
 
 import com.dynashuttle.models.RideRequestDto
+import com.dynashuttle.repositories.ActiveTripStop
 import com.dynashuttle.repositories.RideRequestRepository
 import com.dynashuttle.repositories.StoredRideRequest
 import com.dynashuttle.repositories.VehicleCandidate
+import com.dynashuttle.repositories.VehicleLocation
 import com.dynashuttle.repositories.VehicleRepository
 import com.dynashuttle.services.routing.OptimizedStop
 import com.dynashuttle.services.routing.RouteOptimizer
 import com.dynashuttle.services.routing.StopCandidate
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -17,6 +20,12 @@ import kotlin.test.assertTrue
 /**
  * Hand-written fakes for the three interfaces RoutingService depends on.
  * No mocking library needed at this scale (per the project's testing notes).
+ *
+ * matchRideRequest() is now a suspend function (RouteOptimizer.optimize became
+ * suspend so a real implementation can call an external ETA provider — see
+ * EtaEstimator). Every test below that calls matchRideRequest() is wrapped in
+ * runBlocking { } for that reason; getRideStatus() stayed synchronous since it
+ * never touches the optimizer, so the one test that only calls it needed no change.
  */
 
 private class FakeVehicleRepository(
@@ -41,6 +50,8 @@ private class FakeVehicleRepository(
     }
 
     override fun findVehicleIdByTripId(tripId: String): String? = null
+
+    override fun findVehicleLocationByTripId(tripId: String): VehicleLocation? = null
 }
 
 private class FakeRouteOptimizer(
@@ -50,7 +61,7 @@ private class FakeRouteOptimizer(
     var lastVehicleLng: Double? = null
     var lastStops: List<StopCandidate>? = null
 
-    override fun optimize(vehicleLat: Double, vehicleLng: Double, stops: List<StopCandidate>): List<OptimizedStop> {
+    override suspend fun optimize(vehicleLat: Double, vehicleLng: Double, stops: List<StopCandidate>): List<OptimizedStop> {
         lastVehicleLat = vehicleLat
         lastVehicleLng = vehicleLng
         lastStops = stops
@@ -94,6 +105,8 @@ private class FakeRideRequestRepository : RideRequestRepository {
             )
         }
     }
+
+    override fun findActiveByTripId(tripId: String): List<ActiveTripStop> = emptyList()
 }
 
 class RoutingServiceTest {
@@ -109,7 +122,7 @@ class RoutingServiceTest {
     // ---- Queued path (no vehicle available) ----
 
     @Test
-    fun `returns QUEUED when no vehicle is available nearby`() {
+    fun `returns QUEUED when no vehicle is available nearby`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val service = RoutingService(vehicleRepo, FakeRouteOptimizer(), FakeRideRequestRepository())
 
@@ -121,7 +134,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `persists the ride request as QUEUED with no tripId when unmatched`() {
+    fun `persists the ride request as QUEUED with no tripId when unmatched`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val rideRepo = FakeRideRequestRepository()
         val service = RoutingService(vehicleRepo, FakeRouteOptimizer(), rideRepo)
@@ -134,7 +147,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `queued path never calls the route optimizer`() {
+    fun `queued path never calls the route optimizer`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val optimizer = FakeRouteOptimizer()
         val service = RoutingService(vehicleRepo, optimizer, FakeRideRequestRepository())
@@ -147,7 +160,7 @@ class RoutingServiceTest {
     // ---- Matched path (vehicle available) ----
 
     @Test
-    fun `returns MATCHED with assigned vehicle and ETA when a vehicle is available`() {
+    fun `returns MATCHED with assigned vehicle and ETA when a vehicle is available`() = runBlocking {
         val vehicle = VehicleCandidate(
             vehicleId = "veh-1",
             tripId = "trip-1",
@@ -168,7 +181,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `persists the ride request as MATCHED with the assigned tripId`() {
+    fun `persists the ride request as MATCHED with the assigned tripId`() = runBlocking {
         val vehicle = VehicleCandidate(
             vehicleId = "veh-1",
             tripId = "trip-1",
@@ -189,7 +202,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `picks the first candidate vehicle when multiple are available`() {
+    fun `picks the first candidate vehicle when multiple are available`() = runBlocking {
         val first = VehicleCandidate("veh-1", "trip-1", "drv-1", 12.9700, 77.5900, 3)
         val second = VehicleCandidate("veh-2", "trip-2", "drv-2", 12.9750, 77.5950, 4)
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = listOf(first, second))
@@ -201,7 +214,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `optimizer is invoked with the matched vehicle's current position and the pickup as the only stop`() {
+    fun `optimizer is invoked with the matched vehicle's current position and the pickup as the only stop`() = runBlocking {
         val vehicle = VehicleCandidate(
             vehicleId = "veh-1",
             tripId = "trip-1",
@@ -226,7 +239,7 @@ class RoutingServiceTest {
     // ---- Search radius wiring ----
 
     @Test
-    fun `passes the configured search radius and pickup coordinates to the vehicle repository`() {
+    fun `passes the configured search radius and pickup coordinates to the vehicle repository`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val service = RoutingService(
             vehicleRepository = vehicleRepo,
@@ -243,7 +256,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `defaults to a 2000 meter search radius when not overridden`() {
+    fun `defaults to a 2000 meter search radius when not overridden`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val service = RoutingService(vehicleRepo, FakeRouteOptimizer(), FakeRideRequestRepository())
 
@@ -266,7 +279,7 @@ class RoutingServiceTest {
     }
 
     @Test
-    fun `getRideStatus returns the stored status for a known ride request`() {
+    fun `getRideStatus returns the stored status for a known ride request`() = runBlocking {
         val rideRepo = FakeRideRequestRepository()
         val service = RoutingService(FakeVehicleRepository(emptyList()), FakeRouteOptimizer(), rideRepo)
 
