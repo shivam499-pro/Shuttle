@@ -20,16 +20,27 @@ class AuthService(
     private val passwordHasher: PasswordHasher,
     private val jwtSecret: String,
     private val jwtIssuer: String = "dynashuttle",
-    private val otpTtlSeconds: Long = 300
+    private val otpTtlSeconds: Long = 300,
+    private val otpSender: OtpSender = NoOpOtpSender()
 ) {
     // Thread-safe in-memory cache for OTPs, mapped by employee email
     private val otpCache = ConcurrentHashMap<String, OtpRecord>()
 
-    fun requestOtp(email: String): String? {
-        val employee = authRepository.findEmployeeByEmail(email) ?: return null
+    /**
+     * True when a real [OtpSender] (e.g. [BrevoOtpSender]) is configured, rather
+     * than the dev-mode [NoOpOtpSender] fallback. AuthRoutes.kt uses this to
+     * decide whether including the raw OTP in the HTTP response is safe — see
+     * OtpSender's KDoc for why that distinction matters.
+     */
+    val realOtpDeliveryConfigured: Boolean
+        get() = otpSender.deliversReal
+
+    suspend fun requestOtp(email: String): String? {
+        authRepository.findEmployeeByEmail(email) ?: return null
         val otp = otpGenerator.generate(email)
         // OTP is valid for configured TTL (default 5 minutes)
         otpCache[email] = OtpRecord(otp, Instant.now().plusSeconds(otpTtlSeconds))
+        otpSender.send(email, otp)
         return otp
     }
 

@@ -20,10 +20,18 @@ fun Route.authRoutes(authService: AuthService) {
                     ErrorResponse("not_found", "Employee not found")
                 )
             } else {
-                call.respond(
-                    HttpStatusCode.OK,
-                    EmployeeOtpResponse(otp = otp, message = "OTP generated")
-                )
+                // Redact the OTP once real delivery is configured — including it in
+                // the response would leak a login credential over HTTP in production.
+                // In dev mode (no BREVO_API_KEY set), this is unchanged from before:
+                // the OTP comes back in the response since there's no other way to
+                // get it. See OtpSender's KDoc for the full reasoning.
+                val otpForResponse = if (authService.realOtpDeliveryConfigured) null else otp
+                val message = if (authService.realOtpDeliveryConfigured) {
+                    "OTP sent to your email"
+                } else {
+                    "OTP generated"
+                }
+                call.respond(HttpStatusCode.OK, EmployeeOtpResponse(otp = otpForResponse, message = message))
             }
         }
 

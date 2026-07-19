@@ -44,13 +44,16 @@ data class Stop(
 )
 
 @Serializable
+data class StopActionResponse(val stopId: String, val status: String)
+
+@Serializable
 data class ErrorResponse(val error: String, val message: String)
 
 @Serializable
 data class EmployeeOtpRequest(val email: String)
 
 @Serializable
-data class EmployeeOtpResponse(val otp: String, val message: String)
+data class EmployeeOtpResponse(val otp: String?, val message: String)
 
 @Serializable
 data class EmployeeVerifyRequest(val email: String, val otp: String)
@@ -70,4 +73,3 @@ data class AdminLoginResponse(
     val token: String,
     val role: String
 )
-
