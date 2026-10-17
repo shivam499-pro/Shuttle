@@ -119,22 +119,22 @@ class RoutingServiceTest {
         destinationLng = 77.6100
     )
 
-    // ---- Queued path (no vehicle available) ----
+    // ---- Waitlisted path (no vehicle available) ----
 
     @Test
-    fun `returns QUEUED when no vehicle is available nearby`() = runBlocking {
+    fun `returns WAITLISTED when no vehicle is available nearby`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val service = RoutingService(vehicleRepo, FakeRouteOptimizer(), FakeRideRequestRepository())
 
         val response = service.matchRideRequest(sampleRequest)
 
-        assertEquals("QUEUED", response.status)
+        assertEquals("WAITLISTED", response.status)
         assertNull(response.assignedVehicleId)
         assertNull(response.etaMinutes)
     }
 
     @Test
-    fun `persists the ride request as QUEUED with no tripId when unmatched`() = runBlocking {
+    fun `persists the ride request as WAITLISTED with no tripId when unmatched`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val rideRepo = FakeRideRequestRepository()
         val service = RoutingService(vehicleRepo, FakeRouteOptimizer(), rideRepo)
@@ -142,12 +142,12 @@ class RoutingServiceTest {
         service.matchRideRequest(sampleRequest)
 
         assertEquals(1, rideRepo.savedRequests.size)
-        assertEquals("QUEUED", rideRepo.savedRequests[0].status)
+        assertEquals("WAITLISTED", rideRepo.savedRequests[0].status)
         assertNull(rideRepo.savedRequests[0].tripId)
     }
 
     @Test
-    fun `queued path never calls the route optimizer`() = runBlocking {
+    fun `waitlisted path never calls the route optimizer`() = runBlocking {
         val vehicleRepo = FakeVehicleRepository(vehiclesToReturn = emptyList())
         val optimizer = FakeRouteOptimizer()
         val service = RoutingService(vehicleRepo, optimizer, FakeRideRequestRepository())
@@ -283,12 +283,12 @@ class RoutingServiceTest {
         val rideRepo = FakeRideRequestRepository()
         val service = RoutingService(FakeVehicleRepository(emptyList()), FakeRouteOptimizer(), rideRepo)
 
-        val matchResponse = service.matchRideRequest(sampleRequest) // persisted as QUEUED
+        val matchResponse = service.matchRideRequest(sampleRequest) // persisted as WAITLISTED (no vehicle available)
 
         val status = service.getRideStatus(matchResponse.rideRequestId)
 
         assertNotNull(status)
         assertEquals(matchResponse.rideRequestId, status.rideRequestId)
-        assertEquals("QUEUED", status.status)
+        assertEquals("WAITLISTED", status.status)
     }
 }

@@ -2,6 +2,7 @@ package com.dynashuttle.repositories
 
 import com.dynashuttle.models.Admins
 import com.dynashuttle.models.Employees
+import com.dynashuttle.models.Drivers
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 
@@ -32,6 +33,21 @@ class PostgresAuthRepository : AuthRepository {
                     email = it[Admins.email],
                     passwordHash = it[Admins.passwordHash],
                     companyId = it[Admins.companyId].value.toString()
+                )
+            }
+            .singleOrNull()
+    }
+
+    override fun findDriverByPhone(phone: String): AuthDriver? = transaction {
+        Drivers
+            .selectAll()
+            .where { Drivers.phone eq phone }
+            .map {
+                AuthDriver(
+                    id = it[Drivers.id].value.toString(),
+                    phone = it[Drivers.phone],
+                    companyId = it[Drivers.companyId].value.toString(),
+                    name = it[Drivers.name]
                 )
             }
             .singleOrNull()

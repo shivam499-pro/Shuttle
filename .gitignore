@@ -24,3 +24,12 @@ out/
 Thumbs.db
 
 .agents/
+
+# Local compiled output
+/bin/
+
+# Local database backups
+*.dump
+
+# Local research experiment output
+/experiment_results_raw.csv

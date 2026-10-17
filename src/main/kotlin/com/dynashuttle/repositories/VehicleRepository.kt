@@ -13,7 +13,19 @@ data class VehicleCandidate(
     val driverId: String,
     val currentLat: Double,
     val currentLng: Double,
-    val availableSeats: Int
+    val availableSeats: Int,
+    val companyId: String? = null
+)
+
+/**
+ * Metadata and ownership details for a trip, used for security authorization and tenant scoping.
+ */
+data class TripDetails(
+    val tripId: String,
+    val vehicleId: String,
+    val driverId: String,
+    val companyId: String,
+    val status: String
 )
 
 /**
@@ -41,7 +53,15 @@ interface VehicleAvailabilityLookup {
      * Returns vehicles currently on an active trip within range of [lat]/[lng]
      * that still have at least one free seat.
      */
-    fun findAvailableNear(lat: Double, lng: Double, radiusMeters: Int): List<VehicleCandidate>
+    fun findAvailableNear(lat: Double, lng: Double, radiusMeters: Int): List<VehicleCandidate> =
+        findAvailableNear(lat, lng, radiusMeters, null)
+
+    /**
+     * Returns vehicles currently on an active trip within range of [lat]/[lng]
+     * belonging to [companyId] that still have at least one free seat.
+     */
+    fun findAvailableNear(lat: Double, lng: Double, radiusMeters: Int, companyId: String?): List<VehicleCandidate> =
+        findAvailableNear(lat, lng, radiusMeters)
 }
 
 /** Records the latest GPS fix for a vehicle. */
@@ -55,7 +75,7 @@ interface VehicleLocationUpdater {
     fun updateLocation(vehicleId: String, lat: Double, lng: Double)
 }
 
-/** Resolves which vehicle is assigned to a trip. */
+/** Resolves which vehicle is assigned to a trip and trip ownership details. */
 interface VehicleTripLookup {
     /**
      * Resolves the vehicle assigned to [tripId].
@@ -65,10 +85,16 @@ interface VehicleTripLookup {
      * Returns null if no trip with that id exists (caller should ignore the frame).
      */
     fun findVehicleIdByTripId(tripId: String): String?
+
+    /**
+     * Resolves complete trip details (assigned vehicle, driver, and company ownership)
+     * for authorization verification.
+     */
+    fun findTripDetails(tripId: String): TripDetails? = null
 }
 
 /** Resolves a trip's assigned vehicle's current position. */
-interface VehicleTripLocationLookup {
+interface VehicleTripLocationLookup : VehicleTripLookup {
     /**
      * Resolves the current position of the vehicle assigned to [tripId].
      * Returns null only if [tripId] itself doesn't exist — distinct from the vehicle

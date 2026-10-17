@@ -2,6 +2,8 @@ package com.dynashuttle.services
 
 import com.dynashuttle.models.RideRequestDto
 import com.dynashuttle.models.RideResponseDto
+import com.dynashuttle.models.RideStatus
+import com.dynashuttle.repositories.AllocationResult
 import com.dynashuttle.repositories.RideMatchingRepository
 import com.dynashuttle.repositories.VehicleAvailabilityLookup
 import com.dynashuttle.services.routing.RouteOptimizer
@@ -36,39 +38,51 @@ class RoutingService(
     private val searchRadiusMeters: Int = 2000
 ) {
 
-    suspend fun matchRideRequest(request: RideRequestDto): RideResponseDto {
+    suspend fun matchRideRequest(request: RideRequestDto, companyId: String? = null): RideResponseDto {
         val candidates = vehicleRepository.findAvailableNear(
             lat = request.pickupLat,
             lng = request.pickupLng,
-            radiusMeters = searchRadiusMeters
+            radiusMeters = searchRadiusMeters,
+            companyId = companyId
         )
 
-        val bestVehicle = candidates.firstOrNull()
-            ?: run {
-                val stored = rideRequestRepository.save(request, tripId = null, status = "QUEUED")
-                return RideResponseDto(rideRequestId = stored.id, status = "QUEUED")
+        for (candidate in candidates) {
+            val allocation = rideRequestRepository.allocateSeat(request, candidate.tripId, companyId)
+            if (allocation is AllocationResult.Allocated) {
+                val stored = allocation.stored
+                val optimizedStops = routeOptimizer.optimize(
+                    vehicleLat = candidate.currentLat,
+                    vehicleLng = candidate.currentLng,
+                    stops = listOf(StopCandidate(stored.id, request.pickupLat, request.pickupLng))
+                )
+
+                val etaForThisRequest = optimizedStops.firstOrNull { it.rideRequestId == stored.id }?.etaMinutes
+
+                return RideResponseDto(
+                    rideRequestId = stored.id,
+                    status = "MATCHED",
+                    assignedVehicleId = candidate.vehicleId,
+                    etaMinutes = etaForThisRequest
+                )
             }
+        }
 
-        val stored = rideRequestRepository.save(request, tripId = bestVehicle.tripId, status = "MATCHED")
-
-        val optimizedStops = routeOptimizer.optimize(
-            vehicleLat = bestVehicle.currentLat,
-            vehicleLng = bestVehicle.currentLng,
-            stops = listOf(StopCandidate(stored.id, request.pickupLat, request.pickupLng))
-        )
-
-        val etaForThisRequest = optimizedStops.firstOrNull { it.rideRequestId == stored.id }?.etaMinutes
-
-        return RideResponseDto(
-            rideRequestId = stored.id,
-            status = "MATCHED",
-            assignedVehicleId = bestVehicle.vehicleId,
-            etaMinutes = etaForThisRequest
-        )
+        val stored = rideRequestRepository.save(request, tripId = null, status = RideStatus.WAITLISTED.name)
+        return RideResponseDto(rideRequestId = stored.id, status = RideStatus.WAITLISTED.name)
     }
 
-    fun getRideStatus(rideRequestId: String): RideResponseDto? {
+    fun getRideStatus(
+        rideRequestId: String,
+        callerUserId: String? = null,
+        callerCompanyId: String? = null
+    ): RideResponseDto? {
         val stored = rideRequestRepository.findById(rideRequestId) ?: return null
+        if (callerUserId != null && stored.employeeId != null && stored.employeeId != callerUserId) {
+            return null
+        }
+        if (callerCompanyId != null && stored.companyId != null && stored.companyId != callerCompanyId) {
+            return null
+        }
         return RideResponseDto(rideRequestId = stored.id, status = stored.status)
     }
 }

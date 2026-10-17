@@ -40,3 +40,21 @@ fun Application.configureAuthentication() {
         }
     }
 }
+
+data class UserPrincipal(
+    val userId: String,
+    val role: String,
+    val companyId: String
+)
+
+/**
+ * Extracts and validates the authenticated user identity and company from the JWT claims.
+ * Returns null if no JWTPrincipal is attached or if any of userId, role, or companyId is missing.
+ */
+fun ApplicationCall.authenticatedUser(): UserPrincipal? {
+    val principal = principal<JWTPrincipal>() ?: return null
+    val userId = principal.payload.getClaim("userId")?.asString() ?: return null
+    val role = principal.payload.getClaim("role")?.asString() ?: return null
+    val companyId = principal.payload.getClaim("companyId")?.asString() ?: return null
+    return UserPrincipal(userId = userId, role = role, companyId = companyId)
+}

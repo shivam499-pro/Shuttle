@@ -60,5 +60,44 @@ fun Route.authRoutes(authService: AuthService) {
                 call.respond(HttpStatusCode.OK, response)
             }
         }
+        post("/driver/request-otp") {
+            val request = call.receive<DriverOtpRequest>()
+            val otp = authService.requestDriverOtp(request.phone)
+
+            if (otp == null) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    ErrorResponse("not_found", "Driver not found")
+                )
+            } else {
+                call.respond(
+                    HttpStatusCode.OK,
+                    DriverOtpResponse(
+                        otp = otp,
+                        message = "OTP generated"
+                    )
+                )
+            }
+        }
+
+        post("/driver/verify-otp") {
+            val request = call.receive<DriverVerifyRequest>()
+            val response = authService.verifyDriverOtp(
+                phone = request.phone,
+                otp = request.otp
+            )
+
+            if (response == null) {
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    ErrorResponse("unauthorized", "Invalid or expired OTP")
+                )
+            } else {
+                call.respond(
+                    HttpStatusCode.OK,
+                    response
+                )
+            }
+        }
     }
 }

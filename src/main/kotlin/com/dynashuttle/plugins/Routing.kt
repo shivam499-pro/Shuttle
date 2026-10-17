@@ -9,9 +9,16 @@ import com.dynashuttle.routes.*
 import com.dynashuttle.repositories.PostgresVehicleRepository
 import com.dynashuttle.repositories.PostgresRideRequestRepository
 import com.dynashuttle.repositories.PostgresAuthRepository
+import com.dynashuttle.repositories.PostgresPickupZoneRepository
+import com.dynashuttle.repositories.PostgresShuttleScheduleRepository
+import com.dynashuttle.repositories.PostgresTripRepository
+import com.dynashuttle.repositories.PostgresTripStopPersistenceRepository
 import com.dynashuttle.services.RoutingService
 import com.dynashuttle.services.TripService
+import com.dynashuttle.services.TripExecutionService
 import com.dynashuttle.services.AuthService
+import com.dynashuttle.services.PickupZoneService
+import com.dynashuttle.services.ShuttleScheduleService
 import com.dynashuttle.services.RandomOtpGenerator
 import com.dynashuttle.services.BcryptPasswordHasher
 import com.dynashuttle.services.OtpSender
@@ -115,14 +122,31 @@ fun Application.configureRouting() {
         otpSender = otpSender
     )
 
+    val pickupZoneRepository = com.dynashuttle.repositories.PostgresPickupZoneRepository()
+    val pickupZoneService = PickupZoneService(pickupZoneRepository)
+
+    val shuttleScheduleRepository = PostgresShuttleScheduleRepository()
+    val tripRepository = PostgresTripRepository()
+    val shuttleScheduleService = ShuttleScheduleService(shuttleScheduleRepository, tripRepository)
+
+    val tripStopPersistenceRepository = PostgresTripStopPersistenceRepository()
+    val tripExecutionService = TripExecutionService(
+        tripRepository = tripRepository,
+        tripStopRepository = tripStopPersistenceRepository,
+        rideRequestRepository = rideRequestRepository,
+        vehicleRepository = vehicleRepository
+    )
+
     routing {
         get("/health") {
             call.respond(mapOf("status" to "ok", "service" to "dynashuttle-backend"))
         }
 
-        rideRoutes(routingService)
-        tripRoutes(tripService)
+        rideRoutes(routingService, tripService)
+        tripRoutes(tripService, tripExecutionService)
         websocketRoutes(vehicleRepository)
         authRoutes(authService)
+        pickupZoneRoutes(pickupZoneService)
+        shuttleScheduleRoutes(shuttleScheduleService)
     }
 }

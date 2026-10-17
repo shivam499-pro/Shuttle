@@ -41,7 +41,18 @@ class PostgresVehicleRepository : VehicleRepository {
      * scale; the query is correct without it, just slower on large tables.
      */
     override fun findAvailableNear(lat: Double, lng: Double, radiusMeters: Int): List<VehicleCandidate> =
+        findAvailableNear(lat, lng, radiusMeters, null)
+
+    override fun findAvailableNear(lat: Double, lng: Double, radiusMeters: Int, companyId: String?): List<VehicleCandidate> =
         transaction {
+            val companyUuid = companyId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            if (companyId != null && companyUuid == null) {
+                // If a non-null companyId is provided but is invalid UUID, return empty list
+                return@transaction emptyList()
+            }
+
+            val companyClause = if (companyUuid != null) "AND v.company_id = ?" else ""
+
             // Exposed 0.50.1 has no ST_DWithin/ST_MakePoint DSL support, so we use
             // the underlying JDBC connection directly for this one spatial query.
             // All parameters are bound via '?' — no string concatenation of user input.
@@ -51,18 +62,36 @@ class PostgresVehicleRepository : VehicleRepository {
                     t.id         AS trip_id,
                     t.driver_id  AS driver_id,
                     v.seat_capacity,
+                    (
+                        v.seat_capacity - COALESCE((
+                            SELECT COUNT(*)
+                            FROM ride_requests rr
+                            WHERE rr.trip_id = t.id
+                              AND rr.status IN ('MATCHED', 'PICKUP_PENDING', 'ONBOARD')
+                        ), 0)
+                    )            AS available_seats,
                     v.last_known_lat,
-                    v.last_known_lng
+                    v.last_known_lng,
+                    v.company_id AS vehicle_company_id
                 FROM trips t
                 JOIN vehicles v ON v.id = t.vehicle_id
                 WHERE t.status = 'IN_PROGRESS'
                   AND v.last_known_lat IS NOT NULL
                   AND v.last_known_lng IS NOT NULL
+                  $companyClause
                   AND ST_DWithin(
                         ST_MakePoint(v.last_known_lng, v.last_known_lat)::geography,
                         ST_MakePoint(?, ?)::geography,
                         ?
                   )
+                  AND (
+                        v.seat_capacity - COALESCE((
+                            SELECT COUNT(*)
+                            FROM ride_requests rr
+                            WHERE rr.trip_id = t.id
+                              AND rr.status IN ('MATCHED', 'PICKUP_PENDING', 'ONBOARD')
+                        ), 0)
+                  ) > 0
                 ORDER BY
                     ST_Distance(
                         ST_MakePoint(v.last_known_lng, v.last_known_lat)::geography,
@@ -73,11 +102,15 @@ class PostgresVehicleRepository : VehicleRepository {
             // Exposed exposes the raw JDBC connection via this.connection.connection
             val jdbcConn = this.connection.connection as Connection
             jdbcConn.prepareStatement(sql).use { ps ->
-                ps.setDouble(1, lng)   // ST_MakePoint(lng, lat) — PostGIS is (x=lng, y=lat)
-                ps.setDouble(2, lat)
-                ps.setInt(3, radiusMeters)
-                ps.setDouble(4, lng)   // ORDER BY ST_Distance arguments mirror WHERE clause
-                ps.setDouble(5, lat)
+                var idx = 1
+                if (companyUuid != null) {
+                    ps.setObject(idx++, companyUuid)
+                }
+                ps.setDouble(idx++, lng)   // ST_MakePoint(lng, lat) — PostGIS is (x=lng, y=lat)
+                ps.setDouble(idx++, lat)
+                ps.setInt(idx++, radiusMeters)
+                ps.setDouble(idx++, lng)   // ORDER BY ST_Distance arguments mirror WHERE clause
+                ps.setDouble(idx, lat)
 
                 val rs = ps.executeQuery()
                 val results = mutableListOf<VehicleCandidate>()
@@ -88,7 +121,8 @@ class PostgresVehicleRepository : VehicleRepository {
                         driverId     = rs.getString("driver_id"),
                         currentLat   = rs.getDouble("last_known_lat"),
                         currentLng   = rs.getDouble("last_known_lng"),
-                        availableSeats = rs.getInt("seat_capacity")
+                        availableSeats = rs.getInt("available_seats"),
+                        companyId    = rs.getString("vehicle_company_id")
                     )
                 }
                 results
@@ -97,7 +131,8 @@ class PostgresVehicleRepository : VehicleRepository {
 
     override fun updateLocation(vehicleId: String, lat: Double, lng: Double) {
         transaction {
-            Vehicles.update({ Vehicles.id eq UUID.fromString(vehicleId) }) {
+            val uuid = runCatching { UUID.fromString(vehicleId) }.getOrNull() ?: return@transaction
+            Vehicles.update({ Vehicles.id eq uuid }) {
                 it[lastKnownLat] = lat
                 it[lastKnownLng] = lng
                 it[lastLocationUpdatedAt] = Instant.now()
@@ -112,10 +147,31 @@ class PostgresVehicleRepository : VehicleRepository {
      * all Exposed/database logic inside the repository layer.
      */
     override fun findVehicleIdByTripId(tripId: String): String? = transaction {
+        val uuid = runCatching { UUID.fromString(tripId) }.getOrNull() ?: return@transaction null
         Trips
             .selectAll()
-            .where { Trips.id eq UUID.fromString(tripId) }
-            .map { it[Trips.vehicleId].toString() }
+            .where { Trips.id eq uuid }
+            .map { it[Trips.vehicleId]?.value?.toString() }
+            .singleOrNull()
+    }
+
+    /**
+     * Resolves complete trip details including assigned vehicle, driver, and company ownership.
+     */
+    override fun findTripDetails(tripId: String): TripDetails? = transaction {
+        val uuid = runCatching { UUID.fromString(tripId) }.getOrNull() ?: return@transaction null
+        (Trips innerJoin Vehicles)
+            .selectAll()
+            .where { Trips.id eq uuid }
+            .map {
+                TripDetails(
+                    tripId = it[Trips.id].value.toString(),
+                    vehicleId = it[Trips.vehicleId]?.value?.toString() ?: "",
+                    driverId = it[Trips.driverId]?.value?.toString() ?: "",
+                    companyId = it[Vehicles.companyId].value.toString(),
+                    status = it[Trips.status]
+                )
+            }
             .singleOrNull()
     }
 
@@ -126,9 +182,10 @@ class PostgresVehicleRepository : VehicleRepository {
      * the interface for why that distinction matters to callers).
      */
     override fun findVehicleLocationByTripId(tripId: String): VehicleLocation? = transaction {
+        val uuid = runCatching { UUID.fromString(tripId) }.getOrNull() ?: return@transaction null
         (Trips innerJoin Vehicles)
             .selectAll()
-            .where { Trips.id eq UUID.fromString(tripId) }
+            .where { Trips.id eq uuid }
             .map {
                 VehicleLocation(
                     vehicleId = it[Vehicles.id].toString(),
